@@ -1,0 +1,25 @@
+-- ============================================================
+-- SAMPLE DATA (optional) — for testing the portal before you
+-- have real clients loaded in.
+--
+-- IMPORTANT: This only inserts certifications. You must first
+-- create real user accounts (via Supabase Auth or the signup
+-- flow) for the client_id values to reference — auth.users
+-- cannot be seeded directly via SQL for password-based accounts.
+--
+-- Easiest path: sign up 1-2 test client accounts through the
+-- portal's login page first, note their user IDs from the
+-- profiles table, then replace the placeholder UUIDs below.
+-- ============================================================
+
+-- Example (replace 'PASTE-CLIENT-UUID-HERE' with a real profile id):
+--
+-- insert into certifications
+--   (client_id, product_name, product_category, certification_number, date_issued, expiration_date, approval_status)
+-- values
+--   ('PASTE-CLIENT-UUID-HERE', 'Orange Juice Premium', 'Beverage', 'LAK-2024-001', '2024-01-15', '2025-01-15', 'approved'),
+--   ('PASTE-CLIENT-UUID-HERE', 'Matzah Meal Deluxe', 'Grain Products', 'LAK-2024-002', '2024-02-10', '2025-02-10', 'approved'),
+--   ('PASTE-CLIENT-UUID-HERE', 'Cheese Blend Standard', 'Dairy', 'LAK-2024-008', '2024-08-20', '2025-03-15', 'approved'),
+--   ('PASTE-CLIENT-UUID-HERE', 'Wine Selection Red', 'Beverage', 'LAK-2024-012', '2024-10-05', '2025-10-05', 'approved'),
+--   ('PASTE-CLIENT-UUID-HERE', 'Hummus Classic', 'Prepared Foods', 'LAK-2024-015', '2023-12-01', '2024-12-01', 'approved'),
+--   ('PASTE-CLIENT-UUID-HERE', 'Sparkling Water', 'Beverage', 'LAK-2025-020', null, '2026-01-01', 'pending');
