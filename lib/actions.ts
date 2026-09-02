@@ -158,3 +158,33 @@ export async function createClientAccount(input: {
   revalidatePath('/admin/clients');
   return data;
 }
+
+// ── Resend an activation email to an existing client ──────────
+// Used for accounts that were created without an email going out yet
+// (e.g. imported from Monday.com) — sends a "set your password" link
+// pointed at our own /reset-password page, so it works reliably instead
+// of depending on Supabase's dashboard-triggered email (which ignores
+// our custom redirect and can send people to the wrong page).
+export async function resendClientInvite(email: string) {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+  if (profile?.role !== 'admin' && profile?.role !== 'staff') throw new Error('Not authorized');
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/reset-password`,
+  });
+
+  if (error) throw new Error(error.message);
+
+  await logAudit(supabase, {
+    userId: user.id,
+    action: 'client.invite_resent',
+    entityType: 'profile',
+    details: { email },
+  });
+}

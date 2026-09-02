@@ -202,6 +202,37 @@ moment something changes:
 4. Monday will send a one-time verification request — the portal
    handles this automatically.
 
+### 7f. Importing your client list from Monday.com
+
+If you already keep your clients in a Monday.com CRM board (a
+"Customer Companies"-style board with a company name, and a linked
+contact who has an email), the portal can import them as client
+accounts directly — no need to add each one by hand.
+
+1. Open that board in Monday.com — the ID is the number in the URL,
+   e.g. `https://yourteam.monday.com/boards/1234567890`. Put it in
+   `MONDAY_CLIENTS_BOARD_ID` (redeploy after adding it).
+2. Make sure `MONDAY_API_TOKEN` is also set (same token as step 7a —
+   this sync reuses it).
+3. Go to **Admin → Clients → Sync Clients from Monday.com**.
+
+For each company, the portal uses the email of its first linked
+contact that has one filled in (falling back to the company's own
+email column if none of its contacts do). Companies missing both a
+name and an email are skipped and listed in the result so you can fix
+them in Monday and re-run the sync.
+
+**Important — this does NOT email anyone automatically.** Imported
+clients show up with a "Pending" badge and no password yet. When
+you're ready to actually invite a given client to log in, click
+**"Resend invitation"** next to their name — that sends them a real
+email with a link to set their password. This lets you review the
+imported list (and clean up any bad data) before any client hears
+from the portal.
+
+Re-running the sync later is safe — companies that already have an
+account (matched by email) are left untouched, not duplicated.
+
 ---
 
 ## 8. The portal is trilingual (Spanish / English / Portuguese)
@@ -301,7 +332,8 @@ app/
   admin/certifications/  Full certification list + add new
   admin/clients/          Client list + invite new
   api/certificates/generate/  Generates the PDF certificate(s)
-  api/monday/sync/            Pulls from Monday.com on demand
+  api/monday/sync/            Pulls certifications from Monday.com on demand
+  api/monday/sync-clients/    Imports the client list from Monday.com (no emails sent)
   api/monday/webhook/         Receives real-time pushes from Monday.com
 
   api/cron/expiration-reminders/  Scheduled reminder job (Vercel Cron)
@@ -311,7 +343,8 @@ lib/
   supabase/client.ts   Browser-side Supabase client
   supabase/server.ts   Server-side client (+ admin client for privileged ops)
   actions.ts           Server Actions: approve/reject/create certifications & clients
-  monday.ts            Monday.com API wrapper + column mapping
+  monday.ts            Monday.com API wrapper + certification column mapping
+  monday-clients.ts    Monday.com client-list import (company + contact email lookup)
   CertificatePDF.tsx   The actual certificate PDF template/design (translated)
   status.ts            Computes active/expiring/expired from dates
   reminders.ts         Core expiration-reminder logic (shared by cron + manual trigger)
