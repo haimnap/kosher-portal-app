@@ -38,10 +38,17 @@ export function ClientsTable({ clients }: { clients: ClientRow[] }) {
     return <div className="p-8 text-center text-slate-400 text-sm">{t('clients.none')}</div>;
   }
 
+  const activeCount = clients.filter((c) => c.hasLoggedIn).length;
+
   return (
+    <>
+    <div className="px-5 py-3 text-sm text-slate-600 border-b border-slate-100">
+      Total: <strong>{clients.length}</strong> · {t('clients.active')}: <strong>{activeCount}</strong> · {t('clients.pending')}: <strong>{clients.length - activeCount}</strong>
+    </div>
     <table className="w-full border-collapse">
       <thead>
         <tr className="bg-slate-50 border-b-2 border-slate-200">
+          <th className="px-3 py-3 text-right text-xs text-slate-400 font-semibold uppercase w-10">#</th>
           <th className="px-5 py-3 text-left text-xs text-slate-400 font-semibold uppercase">{t('clients.company')}</th>
           <th className="px-5 py-3 text-left text-xs text-slate-400 font-semibold uppercase">{t('clients.contact')}</th>
           <th className="px-5 py-3 text-left text-xs text-slate-400 font-semibold uppercase">{t('clients.email')}</th>
@@ -52,8 +59,9 @@ export function ClientsTable({ clients }: { clients: ClientRow[] }) {
         </tr>
       </thead>
       <tbody>
-        {clients.map((c) => (
+        {clients.map((c, index) => (
           <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
+            <td className="px-3 py-3.5 text-sm text-right text-slate-400">{index + 1}</td>
             <td className="px-5 py-3.5 text-sm font-medium text-slate-900">{c.company_name || '—'}</td>
             <td className="px-5 py-3.5 text-sm text-slate-600">{c.contact_name || '—'}</td>
             <td className="px-5 py-3.5 text-sm text-slate-600">{c.email || '—'}</td>
@@ -87,5 +95,6 @@ export function ClientsTable({ clients }: { clients: ClientRow[] }) {
         ))}
       </tbody>
     </table>
+    </>
   );
 }
