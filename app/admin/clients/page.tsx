@@ -10,7 +10,7 @@ export default async function AdminClientsPage() {
 
   const { data: clients } = await supabase
     .from('profiles')
-    .select('*, certifications(id)')
+    .select('*, certifications!client_id(id)')
     .eq('role', 'client')
     .order('company_name');
 
