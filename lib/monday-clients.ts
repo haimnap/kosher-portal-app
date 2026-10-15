@@ -139,9 +139,8 @@ export async function fetchClientRecords(): Promise<MondayClientRecord[]> {
   const contactEmails = await fetchContactEmails(Array.from(allContactIds));
 
   return active.map((company) => {
-    const name = getColumn(company, COMPANY_NAME_COLUMN)?.text?.trim() || null;
+   const name = getColumn(company, COMPANY_NAME_COLUMN)?.text?.trim() || company.name?.trim() || null;
     const companyEmail = getColumn(company, COMPANY_EMAIL_COLUMN)?.text?.trim() || null;
-
     const linkedIds = linkedIdsByCompany.get(company.id) ?? [];
     let contactEmail: string | null = null;
     for (const id of linkedIds) {
