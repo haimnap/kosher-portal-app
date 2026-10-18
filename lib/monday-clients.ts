@@ -154,7 +154,7 @@ export async function fetchClientRecords(): Promise<MondayClientRecord[]> {
     return {
       monday_item_id: company.id,
       company_name: name,
-      email: contactEmail || companyEmail,
+   email: contactEmail,
       group_title: company.group?.title ?? '',
     };
   });
