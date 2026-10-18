@@ -28,6 +28,9 @@ interface RawColumnValue {
   id: string;
   text: string | null;
   value: string | null;
+  // Only present on board-relation columns (newer Monday API versions
+  // return value = null for these and expose the ids here instead).
+  linked_item_ids?: string[] | null;
 }
 
 interface RawCompanyItem {
@@ -48,10 +51,15 @@ function getColumn(item: RawCompanyItem, columnId: string): RawColumnValue | und
   return item.column_values.find((cv) => cv.id === columnId);
 }
 
-// Monday's "board relation" columns store their linked item ids as a JSON
-// string in `value`, e.g. {"linkedPulseIds":[{"linkedPulseId":123}]}.
+// Linked item ids of a Monday "board relation" column. Newer API versions
+// expose them as `linked_item_ids`; older ones store them as JSON in
+// `value`, e.g. {"linkedPulseIds":[{"linkedPulseId":123}]}. Support both.
 function extractLinkedIds(column: RawColumnValue | undefined): string[] {
-  if (!column?.value) return [];
+  if (!column) return [];
+  if (column.linked_item_ids && column.linked_item_ids.length > 0) {
+    return column.linked_item_ids.map(String);
+  }
+  if (!column.value) return [];
   try {
     const parsed = JSON.parse(column.value) as { linkedPulseIds?: { linkedPulseId: number }[] };
     return (parsed.linkedPulseIds ?? []).map((x) => String(x.linkedPulseId));
@@ -79,6 +87,9 @@ async function fetchCompanyItems(boardId: string): Promise<RawCompanyItem[]> {
               id
               text
               value
+              ... on BoardRelationValue {
+                linked_item_ids
+              }
             }
           }
         }
@@ -104,16 +115,22 @@ async function fetchContactEmails(contactIds: string[]): Promise<Map<string, str
           id
           column_values(ids: ["${CONTACT_EMAIL_COLUMN}"]) {
             text
+            ... on EmailValue {
+              email
+            }
           }
         }
       }
     `;
-    const data = await mondayRequest<{ items: { id: string; column_values: { text: string | null }[] }[] }>(
+    const data = await mondayRequest<{
+      items: { id: string; column_values: { text: string | null; email?: string | null }[] }[];
+    }>(
       query,
       { ids: batch }
     );
     for (const item of data.items ?? []) {
-      const email = item.column_values?.[0]?.text;
+      const cv = item.column_values?.[0];
+      const email = cv?.email || cv?.text;
       if (email) emailMap.set(item.id, email.trim());
     }
   }
