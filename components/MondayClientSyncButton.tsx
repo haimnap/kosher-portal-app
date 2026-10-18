@@ -7,7 +7,7 @@ import { useTranslation } from './i18n/LanguageProvider';
 type Skipped = { company: string | null; reason: string };
 
 function explainReason(reason: string) {
-  if (reason === 'missing_email') return 'no email found (no linked contact with an email, and no company email)';
+  if (reason === 'missing_email') return 'no email found (no linked contact with an email)';
   if (reason === 'missing_name') return 'no company name';
   if (/already|registered|exists/i.test(reason)) return 'email already used by another company';
   return reason;
