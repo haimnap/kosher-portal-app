@@ -119,7 +119,7 @@ async function fetchContacts(contactIds: string[]): Promise<Map<string, MondayCo
   for (const batch of chunk(contactIds, 90)) {
     const query = `
       query ($ids: [ID!]) {
-        items(ids: $ids) {
+      items(ids: $ids, limit: 100) {
           id
           name
           column_values(ids: ["${CONTACT_EMAIL_COLUMN}"]) {
