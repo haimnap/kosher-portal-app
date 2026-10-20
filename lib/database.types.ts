@@ -15,6 +15,11 @@ export interface Profile {
   phone: string | null;
   address: string | null;
   preferred_language: PreferredLanguage;
+  // Set for team members: the id of their company's main account, which
+  // owns the certifications. Null for the company's main account itself.
+  company_owner_id: string | null;
+  // Monday "Customer Companies" item this company account was synced from.
+  monday_item_id: string | null;
   created_at: string;
   updated_at: string;
 }

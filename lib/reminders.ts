@@ -96,6 +96,19 @@ export async function runExpirationReminders(): Promise<ReminderRunResult> {
   const { data: authUsersPage } = await admin.auth.admin.listUsers({ perPage: 1000 });
   const emailMap = new Map((authUsersPage?.users ?? []).map((u) => [u.id, u.email]));
 
+  // Everyone with a login for the company gets the reminder: the main
+  // account plus its team members.
+  const { data: memberRows } = await admin
+    .from('profiles')
+    .select('id, company_owner_id')
+    .in('company_owner_id', clientIds);
+  const recipientsByClient = new Map<string, string[]>();
+  for (const clientId of clientIds) {
+    const ids = [clientId, ...(memberRows ?? []).filter((m) => m.company_owner_id === clientId).map((m) => m.id)];
+    const emails = Array.from(new Set(ids.map((id) => emailMap.get(id)).filter((e): e is string => !!e)));
+    recipientsByClient.set(clientId, emails);
+  }
+
   const portalUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://portal.latinamericakosher.org';
 
   let emailsSent = 0;
@@ -105,8 +118,8 @@ export async function runExpirationReminders(): Promise<ReminderRunResult> {
   for (const [clientId, items] of byClient) {
     certsFlagged += items.length;
 
-    const email = emailMap.get(clientId);
-    if (!email) {
+    const recipients = recipientsByClient.get(clientId) ?? [];
+    if (recipients.length === 0) {
       errors.push(`No account email found for client ${clientId} — skipped`);
       continue;
     }
@@ -126,18 +139,26 @@ export async function runExpirationReminders(): Promise<ReminderRunResult> {
       }));
 
     const { subject, html } = renderReminderEmail({ lang, companyName, items: reminderItems, portalUrl });
-    const result = await sendEmail({ to: email, subject, html });
+    // One email per person (so recipients don't see each other's address).
+    let anySent = false;
+    for (const email of recipients) {
+      const result = await sendEmail({ to: email, subject, html });
+      if (result.sent) {
+        emailsSent++;
+        anySent = true;
+      } else {
+        errors.push(`${email}: ${result.error ?? 'send failed'}`);
+      }
+    }
 
-    if (result.sent) {
-      emailsSent++;
+    if (anySent) {
       for (const { cert, thresholdsTriggered } of items) {
         for (const threshold_days of thresholdsTriggered) {
           logRowsToInsert.push({ certification_id: cert.id, threshold_days });
         }
       }
     } else {
-      errors.push(`${email}: ${result.error ?? 'send failed'}`);
-      // Not logged — will be retried on the next scheduled run.
+      // Nobody could be emailed — not logged, so it's retried on the next run.
     }
   }
 

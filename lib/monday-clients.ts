@@ -5,10 +5,10 @@
 // SEPARATE board/flow from lib/monday.ts (which syncs product
 // certifications) — this one is about the client list itself.
 //
-// The email used for each client is taken from the first linked contact
-// (on your Monday "Contacts" board) that has an email filled in. If none
-// of the linked contacts have an email, we fall back to the company
-// record's own "E-MAIL" column.
+// Every person connected to a company in its "Contacts" column (on your
+// Monday "Contacts" board) who has an email filled in becomes a person
+// with their own portal login for that company. The company's own
+// "E-MAIL" column is deliberately NOT used.
 //
 // SETUP — see README.md "Connecting Monday.com": set MONDAY_CLIENTS_BOARD_ID
 // to your Customer Companies board's ID (find it in the board's URL).
@@ -16,7 +16,6 @@
 import { mondayRequest } from './monday';
 
 const COMPANY_NAME_COLUMN = 'text_mktb30h4';
-const COMPANY_EMAIL_COLUMN = 'email_mm332crr';
 const CONTACT_LINK_COLUMN = 'account_contact';
 const CONTACT_EMAIL_COLUMN = 'email_mm30yew';
 
@@ -40,10 +39,17 @@ interface RawCompanyItem {
   column_values: RawColumnValue[];
 }
 
+export interface MondayContact {
+  email: string; // lower-cased
+  name: string | null;
+}
+
 export interface MondayClientRecord {
   monday_item_id: string;
   company_name: string | null;
-  email: string | null;
+  // Every connected contact that has an email, in Monday's order, with
+  // duplicate emails removed.
+  contacts: MondayContact[];
   group_title: string;
 }
 
@@ -83,7 +89,7 @@ async function fetchCompanyItems(boardId: string): Promise<RawCompanyItem[]> {
             id
             name
             group { id title }
-            column_values(ids: ["${COMPANY_NAME_COLUMN}", "${COMPANY_EMAIL_COLUMN}", "${CONTACT_LINK_COLUMN}"]) {
+            column_values(ids: ["${COMPANY_NAME_COLUMN}", "${CONTACT_LINK_COLUMN}"]) {
               id
               text
               value
@@ -102,17 +108,20 @@ async function fetchCompanyItems(boardId: string): Promise<RawCompanyItem[]> {
   return data.boards?.[0]?.items_page?.items ?? [];
 }
 
-// Batch-fetches the "E-mail" column for a set of Contacts-board item ids,
-// regardless of which board the company items live on.
-async function fetchContactEmails(contactIds: string[]): Promise<Map<string, string>> {
-  const emailMap = new Map<string, string>();
-  if (contactIds.length === 0) return emailMap;
+const EMAIL_RE = /[A-Z0-9._%+'-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+
+// Batch-fetches name + "E-mail" column for a set of Contacts-board item
+// ids, regardless of which board the company items live on.
+async function fetchContacts(contactIds: string[]): Promise<Map<string, MondayContact>> {
+  const contactMap = new Map<string, MondayContact>();
+  if (contactIds.length === 0) return contactMap;
 
   for (const batch of chunk(contactIds, 90)) {
     const query = `
       query ($ids: [ID!]) {
         items(ids: $ids) {
           id
+          name
           column_values(ids: ["${CONTACT_EMAIL_COLUMN}"]) {
             text
             ... on EmailValue {
@@ -123,19 +132,22 @@ async function fetchContactEmails(contactIds: string[]): Promise<Map<string, str
       }
     `;
     const data = await mondayRequest<{
-      items: { id: string; column_values: { text: string | null; email?: string | null }[] }[];
-    }>(
-      query,
-      { ids: batch }
-    );
+      items: { id: string; name: string | null; column_values: { text: string | null; email?: string | null }[] }[];
+    }>(query, { ids: batch });
+
     for (const item of data.items ?? []) {
       const cv = item.column_values?.[0];
-      const email = cv?.email || cv?.text;
-      if (email) emailMap.set(item.id, email.trim());
+      const raw = cv?.email || cv?.text || '';
+      const match = raw.match(EMAIL_RE);
+      if (!match) continue;
+      contactMap.set(item.id, {
+        email: match[0].toLowerCase(),
+        name: item.name?.trim() || null,
+      });
     }
   }
 
-  return emailMap;
+  return contactMap;
 }
 
 export async function fetchClientRecords(): Promise<MondayClientRecord[]> {
@@ -153,25 +165,26 @@ export async function fetchClientRecords(): Promise<MondayClientRecord[]> {
     ids.forEach((id) => allContactIds.add(id));
   }
 
-  const contactEmails = await fetchContactEmails(Array.from(allContactIds));
+  const contactsById = await fetchContacts(Array.from(allContactIds));
 
   return active.map((company) => {
-   const name = getColumn(company, COMPANY_NAME_COLUMN)?.text?.trim() || company.name?.trim() || null;
-    const companyEmail = getColumn(company, COMPANY_EMAIL_COLUMN)?.text?.trim() || null;
-    const linkedIds = linkedIdsByCompany.get(company.id) ?? [];
-    let contactEmail: string | null = null;
-    for (const id of linkedIds) {
-      const email = contactEmails.get(id);
-      if (email) {
-        contactEmail = email;
-        break;
-      }
+    // Prefer the "company name" text column, but many items leave it blank
+    // and only have the name in the item's own title — fall back to that.
+    const name = getColumn(company, COMPANY_NAME_COLUMN)?.text?.trim() || company.name?.trim() || null;
+
+    const contacts: MondayContact[] = [];
+    const seen = new Set<string>();
+    for (const id of linkedIdsByCompany.get(company.id) ?? []) {
+      const contact = contactsById.get(id);
+      if (!contact || seen.has(contact.email)) continue;
+      seen.add(contact.email);
+      contacts.push(contact);
     }
 
     return {
       monday_item_id: company.id,
       company_name: name,
-   email: contactEmail,
+      contacts,
       group_title: company.group?.title ?? '',
     };
   });

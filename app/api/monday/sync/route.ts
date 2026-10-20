@@ -45,6 +45,11 @@ export async function POST(_req: NextRequest) {
       .map((u) => [u.email!.toLowerCase(), u.id])
   );
 
+  // A team member's email maps to their company's main account, which is
+  // the one that owns the company's certifications.
+  const { data: ownerRows } = await admin.from('profiles').select('id, company_owner_id');
+  const ownerOf = new Map((ownerRows ?? []).map((p) => [p.id as string, (p.company_owner_id as string | null) ?? null]));
+
   let created = 0;
   let updated = 0;
   let skipped = 0;
@@ -56,7 +61,8 @@ export async function POST(_req: NextRequest) {
       continue;
     }
 
-    const clientId = emailToClientId.get(mapped.client_email?.toLowerCase() ?? '');
+    const userId = emailToClientId.get(mapped.client_email?.toLowerCase() ?? '');
+    const clientId = userId ? ownerOf.get(userId) || userId : undefined;
 
     if (!clientId) {
       skipped++;

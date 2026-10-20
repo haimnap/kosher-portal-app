@@ -21,10 +21,14 @@ export default async function PrintPage() {
     .eq('id', user.id)
     .single();
 
+  // Team members see their company's products, which belong to the
+  // company's main account.
+  const companyId = profile?.company_owner_id || user.id;
+
   const { data: certsRaw } = await supabase
     .from('certifications')
     .select('*')
-    .eq('client_id', user.id)
+    .eq('client_id', companyId)
     .eq('approval_status', 'approved')
     .order('expiration_date', { ascending: true });
 

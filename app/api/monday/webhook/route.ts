@@ -56,9 +56,17 @@ export async function POST(req: NextRequest) {
   const admin = createAdminClient();
 
   const { data: authUsersPage } = await admin.auth.admin.listUsers({ perPage: 1000 });
-  const clientId = authUsersPage?.users.find(
+  const userId = authUsersPage?.users.find(
     (u) => u.email?.toLowerCase() === mapped.client_email?.toLowerCase()
   )?.id;
+
+  // A team member's email maps to their company's main account, which
+  // owns the company's certifications.
+  let clientId = userId;
+  if (userId) {
+    const { data: p } = await admin.from('profiles').select('company_owner_id').eq('id', userId).maybeSingle();
+    if (p?.company_owner_id) clientId = p.company_owner_id;
+  }
 
   if (!clientId) {
     return NextResponse.json({ ok: true, note: 'No matching client account for this email' });

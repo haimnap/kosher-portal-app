@@ -15,7 +15,8 @@ export default async function AdminDashboardPage() {
   const { count: clientCount } = await supabase
     .from('profiles')
     .select('*', { count: 'exact', head: true })
-    .eq('role', 'client');
+    .eq('role', 'client')
+    .is('company_owner_id', null); // count companies, not people
 
   const { data: allCertsRaw } = await supabase
     .from('certifications')

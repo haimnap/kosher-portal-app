@@ -9,6 +9,9 @@ export default async function NewCertificationPage() {
     .from('profiles')
     .select('id, company_name')
     .eq('role', 'client')
+    // One entry per company: only main accounts (team members share
+    // their company's products).
+    .is('company_owner_id', null)
     .order('company_name');
 
   return (
