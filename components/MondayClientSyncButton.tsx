@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslation } from './i18n/LanguageProvider';
+import { RemovePersonButton } from './RemovePersonButton';
 
 interface SyncResult {
   companies: number;
@@ -11,7 +12,7 @@ interface SyncResult {
   peopleUnchanged: number;
   total: number;
   skipped: { company: string | null; reason: string }[];
-  review: { company: string | null; email: string; reason: string }[];
+  review: { company: string | null; email: string; reason: string; userId?: string }[];
 }
 
 // The last result is kept in this browser tab so it stays visible after
@@ -116,8 +117,11 @@ export function MondayClientSyncButton() {
               </p>
               <ul className="space-y-1">
                 {result.review.map((r, i) => (
-                  <li key={i}>
-                    <strong>{r.company || '—'}</strong> — {r.email}: {reasonText(r.reason)}
+                  <li key={i} className="flex flex-wrap items-center gap-x-2">
+                    <span>
+                      <strong>{r.company || '—'}</strong> — {r.email}: {reasonText(r.reason)}
+                    </span>
+                    {r.userId && <RemovePersonButton userId={r.userId} email={r.email} />}
                   </li>
                 ))}
               </ul>

@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react';
 import { resendClientInvite } from '@/lib/actions';
 import { useTranslation } from './i18n/LanguageProvider';
+import { RemovePersonButton } from './RemovePersonButton';
 
 export interface ClientPerson {
   id: string;
@@ -97,6 +98,7 @@ export function ClientsTable({ clients }: { clients: ClientRow[] }) {
                           {isPending && busyId === p.id ? t('clients.resending') : t('clients.resendInvite')}
                         </button>
                       )}
+                      <RemovePersonButton userId={p.id} email={p.email} />
                     </li>
                   ))}
                 </ul>

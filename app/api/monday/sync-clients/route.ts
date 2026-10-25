@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { fetchClientRecords } from '@/lib/monday-clients';
 import { logAudit } from '@/lib/audit';
+import { isExcludedClientEmail } from '@/lib/client-email-filter';
+import { transferCompanyOwnership } from '@/lib/company-accounts';
 
 // POST /api/monday/sync-clients
 // Staff/admin-triggered. Pulls every company from the configured Monday
@@ -20,6 +22,10 @@ import { logAudit } from '@/lib/audit';
 // Important: this does NOT send any email. Accounts are created silently
 // so an admin can review the list first — use the "Resend invitation"
 // button on the Clients page whenever you're ready to invite someone.
+//
+// Addresses that must never get a client login (other kosher agencies,
+// our own team, automatic no-reply senders — see lib/client-email-filter)
+// are ignored even when they're connected in Monday.
 //
 // It never deletes anything. Accounts that look like they belong to a
 // company but are no longer connected in Monday are only REPORTED
@@ -106,7 +112,9 @@ export async function POST(_req: NextRequest) {
   let peopleLinked = 0;
   let peopleUnchanged = 0;
   const skipped: { company: string | null; reason: string }[] = [];
-  const review: { company: string | null; email: string; reason: string }[] = [];
+  // userId is set when the person has a portal login (so the admin can
+  // remove it straight from the sync result).
+  const review: { company: string | null; email: string; reason: string; userId?: string }[] = [];
 
   // email -> Monday company it was assigned to in THIS run (detects one
   // person connected to two different companies).
@@ -146,6 +154,29 @@ export async function POST(_req: NextRequest) {
     return id;
   }
 
+  // Lists the logins that belong to a company but aren't (or can't be)
+  // connected to it in Monday, so the admin can remove them.
+  function reportUnconnected(companyName: string, mondayId: string, ownerId: string | undefined, connected: Set<string>) {
+    const target = normalizeName(companyName);
+    for (const p of profiles.values()) {
+      if (p.role !== 'client') continue;
+      const belongs =
+        (ownerId && (p.id === ownerId || p.company_owner_id === ownerId)) ||
+        (!p.company_owner_id && p.monday_item_id === mondayId) ||
+        (!p.company_owner_id && !p.monday_item_id && normalizeName(p.company_name) === target);
+      if (!belongs) continue;
+      const email = emailById.get(p.id);
+      if (email && !connected.has(email)) {
+        review.push({
+          company: companyName,
+          email,
+          reason: isExcludedClientEmail(email) ? 'excluded_address' : 'not_connected_in_monday',
+          userId: p.id,
+        });
+      }
+    }
+  }
+
   for (const record of records) {
     const companyName = record.company_name;
     if (!companyName) {
@@ -154,6 +185,7 @@ export async function POST(_req: NextRequest) {
     }
     if (record.contacts.length === 0) {
       skipped.push({ company: companyName, reason: 'missing_email' });
+      reportUnconnected(companyName, record.monday_item_id, undefined, new Set());
       continue;
     }
 
@@ -162,6 +194,7 @@ export async function POST(_req: NextRequest) {
     // Contacts we may use for this company: not staff/admin accounts, and
     // not already used by another Monday company in this run.
     const usable = record.contacts.filter((c) => {
+      if (isExcludedClientEmail(c.email)) return false;
       const existingId = userIdByEmail.get(c.email);
       const existing = existingId ? profiles.get(existingId) : undefined;
       if (existing && existing.role !== 'client') {
@@ -178,16 +211,23 @@ export async function POST(_req: NextRequest) {
 
     if (usable.length === 0) {
       skipped.push({ company: companyName, reason: 'missing_email' });
+      reportUnconnected(companyName, mondayId, undefined, new Set());
       continue;
     }
 
     // ── 1. Find (or create) the company's main account ──────────────
     let ownerId: string | undefined;
 
-    // a) The account already linked to this Monday company.
+    // a) The account already linked to this Monday company — unless its
+    //    address must not have a client login (e.g. an agency address that
+    //    became the main account earlier). Then another person of the
+    //    company takes over as main account below.
+    let demoteOwnerId: string | undefined;
     for (const p of profiles.values()) {
       if (p.role === 'client' && p.monday_item_id === mondayId && !p.company_owner_id) {
-        ownerId = p.id;
+        const email = emailById.get(p.id);
+        if (email && isExcludedClientEmail(email)) demoteOwnerId = p.id;
+        else ownerId = p.id;
         break;
       }
     }
@@ -204,7 +244,7 @@ export async function POST(_req: NextRequest) {
         .filter(
           (p): p is ProfileRow =>
             !!p &&
-            !p.company_owner_id &&
+            (!p.company_owner_id || p.company_owner_id === demoteOwnerId) &&
             (!p.monday_item_id || p.monday_item_id === mondayId) &&
             (!ownsCertifications.has(p.id) || normalizeName(p.company_name) === target)
         );
@@ -221,6 +261,25 @@ export async function POST(_req: NextRequest) {
           continue;
         }
         ownerId = await createPerson(first.email, companyName, first.name);
+      }
+
+      if (demoteOwnerId && demoteOwnerId !== ownerId) {
+        await transferCompanyOwnership(admin, demoteOwnerId, ownerId);
+        const newOwnerId = ownerId;
+        const old = profiles.get(demoteOwnerId)!;
+        for (const p of profiles.values()) {
+          if (p.company_owner_id === demoteOwnerId && p.id !== newOwnerId) p.company_owner_id = newOwnerId;
+        }
+        profiles.set(newOwnerId, {
+          ...profiles.get(newOwnerId)!,
+          company_owner_id: null,
+          monday_item_id: old.monday_item_id,
+        });
+        profiles.set(demoteOwnerId, { ...old, company_owner_id: newOwnerId, monday_item_id: null });
+        if (ownsCertifications.has(demoteOwnerId)) {
+          ownsCertifications.delete(demoteOwnerId);
+          ownsCertifications.add(newOwnerId);
+        }
       }
 
       const owner = profiles.get(ownerId)!;
@@ -282,19 +341,7 @@ export async function POST(_req: NextRequest) {
     }
 
     // ── 3. Report accounts of this company that Monday doesn't list ──
-    const connected = new Set(usable.map((c) => c.email));
-    for (const p of profiles.values()) {
-      if (p.role !== 'client') continue;
-      const belongs =
-        p.id === ownerId ||
-        p.company_owner_id === ownerId ||
-        (!p.company_owner_id && !p.monday_item_id && normalizeName(p.company_name) === target);
-      if (!belongs) continue;
-      const email = emailById.get(p.id);
-      if (email && !connected.has(email)) {
-        review.push({ company: companyName, email, reason: 'not_connected_in_monday' });
-      }
-    }
+    reportUnconnected(companyName, mondayId, ownerId, new Set(usable.map((c) => c.email)));
   }
 
   await logAudit(supabase, {

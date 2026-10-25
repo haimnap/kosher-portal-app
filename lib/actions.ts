@@ -3,6 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { createClient, createAdminClient } from '@/lib/supabase/server';
 import { logAudit } from '@/lib/audit';
+import { isExcludedClientEmail } from '@/lib/client-email-filter';
+import { transferCompanyOwnership } from '@/lib/company-accounts';
 
 // ── Approve / Reject a certification ─────────────────────────
 export async function approveCertification(certificationId: string) {
@@ -187,4 +189,87 @@ export async function resendClientInvite(email: string) {
     entityType: 'profile',
     details: { email },
   });
+}
+
+// ── Remove one person's portal login ─────────────────────────
+// Used from the Clients page and the Monday sync result. Deletes that
+// person's login only — never a company's products:
+//   * a team member is simply removed;
+//   * if it's the company's main account and other people remain, one of
+//     them first becomes the main account (products move with it);
+//   * the last login of a company that still has products is refused.
+// Returns a result instead of throwing so the page can show the message.
+export async function removeClientPerson(userId: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: 'Not authenticated' };
+
+  const { data: me } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+  if (me?.role !== 'admin' && me?.role !== 'staff') return { ok: false, error: 'Not authorized' };
+
+  const admin = createAdminClient();
+
+  const { data: target } = await admin
+    .from('profiles')
+    .select('id, role, company_name, company_owner_id')
+    .eq('id', userId)
+    .maybeSingle();
+  if (!target) return { ok: true }; // already gone
+  if (target.role !== 'client') return { ok: false, error: 'Only client logins can be removed here.' };
+
+  const { data: authUser } = await admin.auth.admin.getUserById(userId);
+  const email = authUser?.user?.email ?? null;
+
+  try {
+    if (!target.company_owner_id) {
+      const { data: members } = await admin
+        .from('profiles')
+        .select('id, created_at')
+        .eq('company_owner_id', userId)
+        .order('created_at');
+
+      if (members && members.length > 0) {
+        // Prefer a member whose address may have a client login.
+        let newOwnerId = members[0].id as string;
+        for (const m of members) {
+          const { data: mu } = await admin.auth.admin.getUserById(m.id as string);
+          const memberEmail = mu?.user?.email;
+          if (memberEmail && !isExcludedClientEmail(memberEmail)) {
+            newOwnerId = m.id as string;
+            break;
+          }
+        }
+        await transferCompanyOwnership(admin, userId, newOwnerId);
+      } else {
+        const { count } = await admin
+          .from('certifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('client_id', userId);
+        if (count && count > 0) {
+          return {
+            ok: false,
+            error: `This is the only login of ${target.company_name ?? 'this company'}, which has ${count} product(s). Add another person to the company first.`,
+          };
+        }
+      }
+    }
+
+    const { error } = await admin.auth.admin.deleteUser(userId);
+    if (error) return { ok: false, error: error.message };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Could not remove this login' };
+  }
+
+  await logAudit(supabase, {
+    userId: user.id,
+    action: 'client.login_removed',
+    entityType: 'profile',
+    entityId: userId,
+    details: { email, company_name: target.company_name },
+  });
+
+  revalidatePath('/admin/clients');
+  return { ok: true };
 }
